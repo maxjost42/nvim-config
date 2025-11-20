@@ -91,7 +91,7 @@ vim.g.mapleader = ' '
 vim.g.maplocalleader = ' '
 
 -- Set to true if you have a Nerd Font installed and selected in the terminal
-vim.g.have_nerd_font = false
+vim.g.have_nerd_font = true
 
 -- [[ Setting options ]]
 -- See `:help vim.o`
@@ -102,7 +102,7 @@ vim.g.have_nerd_font = false
 vim.o.number = true
 -- You can also add relative line numbers, to help with jumping.
 --  Experiment for yourself to see if you like it!
--- vim.o.relativenumber = true
+vim.o.relativenumber = true
 
 -- Enable mouse mode, can be useful for resizing splits for example!
 vim.o.mouse = 'a'
@@ -123,6 +123,10 @@ vim.o.breakindent = true
 
 -- Save undo history
 vim.o.undofile = true
+
+-- set default shiftwidth NOTE: done to not get 8 spaces indentation where it should only be 4. LG Max
+vim.o.expandtab = true
+vim.o.shiftwidth = 4
 
 -- Case-insensitive searching UNLESS \C or one or more capital letters in the search term
 vim.o.ignorecase = true
@@ -199,6 +203,14 @@ vim.keymap.set('n', '<C-l>', '<C-w><C-l>', { desc = 'Move focus to the right win
 vim.keymap.set('n', '<C-j>', '<C-w><C-j>', { desc = 'Move focus to the lower window' })
 vim.keymap.set('n', '<C-k>', '<C-w><C-k>', { desc = 'Move focus to the upper window' })
 
+-- NOTE: keybindings for quarto/markdown like codechunks for python and R. LG Max
+vim.keymap.set({ 'n', 'i' }, '<m-i>p', '<esc>i```{python}<cr>```<esc>0', { desc = '[i]nsert [p]ython code chunk' })
+vim.keymap.set({ 'n', 'i' }, '<m-i>r', '<esc>i```{r}<cr>```<esc>0', { desc = '[i]nsert [R] code chunk' })
+
+-- NOTE: keybindings for radian and ipython terminal. LG Max
+vim.keymap.set({ 'n' }, '<leader>cip', ':split term://ipython<cr>', { desc = '[c]reate [i]nteractive [p]ython split' })
+vim.keymap.set({ 'n' }, '<leader>cir', ':split term://radian<cr>', { desc = '[c]reate [i]nteractive [r] split' })
+
 -- NOTE: Some terminals have colliding keymaps or are not able to send distinct keycodes
 -- vim.keymap.set("n", "<C-S-h>", "<C-w>H", { desc = "Move window to the left" })
 -- vim.keymap.set("n", "<C-S-l>", "<C-w>L", { desc = "Move window to the right" })
@@ -216,6 +228,15 @@ vim.api.nvim_create_autocmd('TextYankPost', {
   group = vim.api.nvim_create_augroup('kickstart-highlight-yank', { clear = true }),
   callback = function()
     vim.hl.on_yank()
+  end,
+})
+
+-- NOTE: LG Max no line numbers in terminal splits
+vim.api.nvim_create_autocmd('TermOpen', {
+  desc = 'remove line numbers in terminal',
+  group = vim.api.nvim_create_augroup('kickstart-term', { clear = true }),
+  callback = function()
+    vim.wo.number = false
   end,
 })
 
@@ -248,6 +269,49 @@ rtp:prepend(lazypath)
 require('lazy').setup({
   -- NOTE: Plugins can be added with a link (or for a github repo: 'owner/repo' link).
   'NMAC427/guess-indent.nvim', -- Detect tabstop and shiftwidth automatically
+
+  -- NOTE: added quarto support (opts just so that setup function is called. LG Max
+  -- This already adds all lsp features needed (completion, hover, etc.)
+  {
+    'quarto-dev/quarto-nvim',
+    opts = {},
+    dependencies = {
+      'jmbuhr/otter.nvim',
+      opts = {},
+    },
+  },
+
+  -- NOTE: LG Max. Sends a python code cell to ipython terminal
+  -- in /nvim/ftplugin/quarto.lua we specify different code cell delimiter for quarto files
+  {
+    'jpalardy/vim-slime',
+    init = function()
+      vim.g.slime_target = 'neovim'
+      vim.g.slime_python_ipython = 1
+      vim.g.slime_dispatch_ipython_pause = 100
+      vim.g.slime_cell_delimiter = '#\\s\\=%%'
+      vim.cmd [[
+        function! _EscapeText_quarto(text)
+          if slime#config#resolve("python_ipython") && len(split(a:text,"\n")) > 1
+            return ["%cpaste -q\n", slime#config#resolve("dispatch_ipython_pause"), a:text, "--\n"]
+          else
+            let empty_lines_pat = '\(^\|\n\)\zs\(\s*\n\+\)\+'
+            let no_empty_lines = substitute(a:text, empty_lines_pat, "", "g")
+            let dedent_pat = '\(^\|\n\)\zs'.matchstr(no_empty_lines, '^\s*')
+            let dedented_lines = substitute(no_empty_lines, dedent_pat, "", "g")
+            let except_pat = '\(elif\|else\|except\|finally\)\@!'
+            let add_eol_pat = '\n\s[^\n]\+\n\zs\ze\('.except_pat.'\S\|$\)'
+            return substitute(dedented_lines, add_eol_pat, "\n", "g")
+          end
+        endfunction
+      ]]
+    end,
+    config = function()
+      vim.keymap.set({ 'n', 'i' }, '<leader>sp', function()
+        vim.cmd [[ call slime#send_cell() ]]
+      end, { desc = 'send code cell to terminal' })
+    end,
+  },
 
   -- NOTE: Plugins can also be added by using a table,
   -- with the first argument being the link and the following
@@ -572,6 +636,9 @@ require('lazy').setup({
           --  the definition of its *type*, not where it was *defined*.
           map('grt', require('telescope.builtin').lsp_type_definitions, '[G]oto [T]ype Definition')
 
+          -- NOTE: I added this myself since it was in the video but not in the config. LG Max
+          map('K', vim.lsp.buf.hover, 'Hover Documentation')
+
           -- This function resolves a difference between neovim nightly (version 0.11) and stable (version 0.10)
           ---@param client vim.lsp.Client
           ---@param method vim.lsp.protocol.Method
@@ -661,6 +728,13 @@ require('lazy').setup({
       --  So, we create new capabilities with blink.cmp, and then broadcast that to the servers.
       local capabilities = require('blink.cmp').get_lsp_capabilities()
 
+      -- NOTE: speedup when opening quarto files. LG MAx
+      -- slowdown was because blink and nvim fight over who is responsible
+      -- this normally must only be done for pyright but if it brings no bad
+      -- side effects we let it stay as such
+      -- capabilities.workspace.didChangeWatchedFiles.dynamicRegistration = false
+      -- this broke the whole lsp stuff
+
       -- Enable the following language servers
       --  Feel free to add/remove any LSPs that you want here. They will automatically be installed.
       --
@@ -673,7 +747,8 @@ require('lazy').setup({
       local servers = {
         -- clangd = {},
         -- gopls = {},
-        -- pyright = {},
+        pyright = {}, -- NOTE: added this for python code completion. LG Max
+        r_language_server = {}, -- and this for R
         -- rust_analyzer = {},
         -- ... etc. See `:help lspconfig-all` for a list of all the pre-configured LSPs
         --
